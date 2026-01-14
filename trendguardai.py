@@ -1,5 +1,5 @@
 # app.py
-# TrendGuardAI - نسخة محسّنة ومستقرة - يناير 2026
+# TrendGuardAI - نسخة محسّنة مع اقتراحات رموز
 
 import streamlit as st
 import pandas as pd
@@ -17,6 +17,7 @@ try:
 except ImportError:
     CoinGeckoAPI = None
 
+
 # ────────────────────────────────────────────────
 #  إعدادات الصفحة
 # ────────────────────────────────────────────────
@@ -24,39 +25,51 @@ except ImportError:
 st.set_page_config(
     page_title="TrendGuardAI – حارس الترندات",
     page_icon="🛡️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
+
 # ────────────────────────────────────────────────
-#  قراءة المفتاح
+#  مفتاح Polygon
 # ────────────────────────────────────────────────
 
 POLYGON_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 
 if not POLYGON_KEY:
-    st.warning("مفتاح Polygon.io غير موجود في Secrets → بعض الرموز (الأسهم خصوصًا) لن تعمل")
+    st.sidebar.warning("مفتاح Polygon.io غير موجود في Secrets\n→ بعض الأسهم لن تعمل")
+
+
+# ────────────────────────────────────────────────
+#  قائمة الرموز الشائعة (للاقتراحات)
+# ────────────────────────────────────────────────
+
+POPULAR_SYMBOLS = [
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD", "BNB-USD",
+    "AVAX-USD", "LINK-USD", "DOT-USD", "LTC-USD", "MATIC-USD",
+    "AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AMD", "INTC"
+]
+
 
 # ────────────────────────────────────────────────
 #  دوال جلب البيانات
 # ────────────────────────────────────────────────
 
-@st.cache_data(ttl=420, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_polygon(ticker: str, days: int) -> pd.DataFrame | None:
     if not RESTClient or not POLYGON_KEY:
         return None
 
     client = RESTClient(api_key=POLYGON_KEY)
 
-    ticker_clean = ticker.strip().upper()
-    if ticker_clean.endswith("-USD"):
-        base = ticker_clean[:-4]
+    t = ticker.strip().upper()
+    if t.endswith("-USD"):
+        base = t[:-4]
         poly_ticker = f"X:{base}USD"
     else:
-        poly_ticker = ticker_clean
+        poly_ticker = t
 
     try:
-        from_ = (datetime.now() - timedelta(days=days+1)).strftime("%Y-%m-%d")
+        from_ = (datetime.now() - timedelta(days=days+2)).strftime("%Y-%m-%d")
         to_   = datetime.now().strftime("%Y-%m-%d")
 
         aggs = client.get_aggs(poly_ticker, 1, "day", from_, to_)
@@ -67,11 +80,11 @@ def fetch_polygon(ticker: str, days: int) -> pd.DataFrame | None:
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         df = df.set_index("timestamp")[["open","high","low","close","volume"]]
         return df
-    except Exception:
+    except:
         return None
 
 
-@st.cache_data(ttl=420, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_coingecko(ticker: str, days: int) -> pd.DataFrame | None:
     if not CoinGeckoAPI:
         return None
@@ -80,10 +93,10 @@ def fetch_coingecko(ticker: str, days: int) -> pd.DataFrame | None:
 
     clean = ticker.strip().upper().replace("-USD", "").replace("-","")
     mapping = {
-        "BTC":"bitcoin",   "ETH":"ethereum",   "SOL":"solana",
-        "ADA":"cardano",   "XRP":"ripple",     "DOGE":"dogecoin",
-        "BNB":"binancecoin","AVAX":"avalanche-2","DOT":"polkadot",
-        "LINK":"chainlink", "MATIC":"polygon",  "LTC":"litecoin",
+        "BTC":"bitcoin", "ETH":"ethereum", "SOL":"solana", "XRP":"ripple",
+        "ADA":"cardano", "DOGE":"dogecoin", "BNB":"binancecoin",
+        "AVAX":"avalanche-2", "DOT":"polkadot", "LINK":"chainlink",
+        "MATIC":"polygon", "LTC":"litecoin"
     }
     coin_id = mapping.get(clean, clean.lower())
 
@@ -92,141 +105,167 @@ def fetch_coingecko(ticker: str, days: int) -> pd.DataFrame | None:
         if "prices" not in data or len(data["prices"]) < 2:
             return None
 
-        prices  = pd.DataFrame(data["prices"],  columns=["ts","close"])
-        volumes = pd.DataFrame(data["total_volumes"], columns=["ts","volume"])
+        p = pd.DataFrame(data["prices"],  columns=["ts","close"])
+        v = pd.DataFrame(data["total_volumes"], columns=["ts","volume"])
 
-        prices["ts"]  = pd.to_datetime(prices["ts"],  unit="ms")
-        volumes["ts"] = pd.to_datetime(volumes["ts"], unit="ms")
+        p["ts"] = pd.to_datetime(p["ts"], unit="ms")
+        v["ts"] = pd.to_datetime(v["ts"], unit="ms")
 
-        df = pd.merge(prices, volumes, on="ts").set_index("ts")
-        df["close"] = df["close"].astype(float)
-        df["volume"] = df["volume"].astype(float)
+        df = pd.merge(p, v, on="ts").set_index("ts")
+        df[["close","volume"]] = df[["close","volume"]].astype(float)
 
-        # تقريب بسيط للـ OHLC
         df["open"]  = df["close"].shift(1).fillna(df["close"])
         df["high"]  = df[["open","close"]].max(axis=1)
         df["low"]   = df[["open","close"]].min(axis=1)
 
         return df[["open","high","low","close","volume"]]
-    except Exception:
+    except:
         return None
 
 
-def detect_pump_dump_signals(df: pd.DataFrame) -> list:
+def find_pump_dump_signals(df: pd.DataFrame) -> list[dict]:
     if len(df) < 3:
         return []
 
     df = df.copy()
-    df["price_chg"] = df["close"].pct_change() * 100
-    df["vol_chg"]   = df["volume"].pct_change() * 100
+    df["price_pct"] = df["close"].pct_change() * 100
+    df["vol_pct"]   = df["volume"].pct_change() * 100
 
-    signals = (df["price_chg"] > 5.0) & (df["vol_chg"] > 250.0)
+    signals = (df["price_pct"] > 5.0) & (df["vol_pct"] > 250.0)
 
     alerts = []
     for dt, row in df[signals].iterrows():
-        risk = min(99, int(abs(row["price_chg"]) * 8 + abs(row["vol_chg"]) * 0.1))
+        risk = min(99, int(row["price_pct"] * 7 + row["vol_pct"] * 0.08))
         alerts.append({
             "date": dt.strftime("%Y-%m-%d"),
-            "price_chg": round(row["price_chg"],1),
-            "vol_chg":   round(row["vol_chg"],0),
-            "risk_pct":  risk
+            "price_change": round(row["price_pct"], 1),
+            "vol_change":   round(row["vol_pct"], 0),
+            "risk":         risk
         })
 
     return alerts
 
 
 # ────────────────────────────────────────────────
-#  واجهة المستخدم
+#  الواجهة
 # ────────────────────────────────────────────────
 
 st.title("🛡️ TrendGuardAI")
-st.caption("كشف التحركات المشبوهة (Pump & Dump / FOMO) في الأسهم والعملات الرقمية")
+st.caption("كشف التحركات المشبوهة (Pump & Dump / FOMO)")
 
-left, right = st.columns([5,3])
+# ─── اختيار الرمز ──────────────────────────────────────────────────
 
-with left:
-    symbol = st.text_input("رمز الأصل", "BTC-USD", key="symbol").strip().upper()
+st.subheader("رمز الأصل")
 
-with right:
-    lookback = st.slider("عدد الأيام", 3, 30, 7, step=1)
+preset = st.selectbox(
+    "اختر رمزًا شائعًا أو اكتب بنفسك",
+    options=["اكتب رمزًا مخصصًا..."] + POPULAR_SYMBOLS,
+    index=0,
+    key="preset"
+)
 
-provider_options = ["تلقائي"]
-if POLYGON_KEY:
-    provider_options.append("Polygon.io فقط")
-provider_options.append("CoinGecko فقط")
+if preset == "اكتب رمزًا مخصصًا...":
+    symbol = st.text_input(
+        "اكتب الرمز (مثال: BTC-USD أو TSLA)",
+        value="",
+        placeholder="BTC-USD, ETH-USD, AAPL, TSLA...",
+        key="custom"
+    ).strip().upper()
+else:
+    symbol = preset.strip().upper()
+    st.success(f"الرمز المختار: **{symbol}**", icon="✅")
 
-source_choice = st.selectbox("المصدر المفضّل", provider_options, index=0)
+# ─── باقي الإعدادات ───────────────────────────────────────────────
 
-if st.button("تحليل الآن", type="primary", use_container_width=True):
+col_days, col_source = st.columns([1, 2])
+
+with col_days:
+    days = st.slider("عدد الأيام", 3, 30, 7)
+
+with col_source:
+    source_pref = st.radio(
+        "المصدر المفضّل",
+        options=["تلقائي", "Polygon.io فقط", "CoinGecko فقط"],
+        horizontal=True,
+        index=0
+    )
+
+# ─── زر التحليل ───────────────────────────────────────────────────
+
+if st.button("🚀 تحليل الآن", type="primary", use_container_width=True):
 
     if not symbol:
-        st.error("أدخل رمزًا صحيحًا")
+        st.error("يرجى إدخال رمز أصل صحيح")
         st.stop()
 
-    with st.spinner("جاري جلب ومعالجة البيانات..."):
+    with st.spinner("جاري جلب البيانات..."):
 
         df = None
-        used_source = ""
+        used = ""
 
-        # ─── الترتيب حسب اختيار المستخدم ────────────────────────────────
-        attempts = []
-
-        if source_choice == "تلقائي":
+        order = []
+        if source_pref == "تلقائي":
             if POLYGON_KEY:
-                attempts = ["polygon", "coingecko"]
+                order = ["polygon", "coingecko"]
             else:
-                attempts = ["coingecko"]
-        elif source_choice == "Polygon.io فقط":
-            attempts = ["polygon"]
+                order = ["coingecko"]
+        elif source_pref == "Polygon.io فقط":
+            order = ["polygon"]
         else:
-            attempts = ["coingecko"]
+            order = ["coingecko"]
 
-        for attempt in attempts:
-            if attempt == "polygon":
-                df = fetch_polygon(symbol, lookback)
+        for src in order:
+            if src == "polygon":
+                df = fetch_polygon(symbol, days)
                 if df is not None:
-                    used_source = "Polygon.io"
+                    used = "Polygon.io"
                     break
             else:
-                df = fetch_coingecko(symbol, lookback)
+                df = fetch_coingecko(symbol, days)
                 if df is not None:
-                    used_source = "CoinGecko"
+                    used = "CoinGecko"
                     break
 
         if df is None:
             st.error("تعذّر جلب البيانات من أي مصدر.")
-            if "coingecko" in attempts:
-                st.info("• تأكد من كتابة الرمز بشكل صحيح\n"
-                        "• للعملات الرقمية: BTC-USD, ETH-USD, SOL-USD ...\n"
-                        "• للأسهم: AAPL, TSLA, NVDA ... (يتطلب مفتاح Polygon)")
+            st.markdown("""
+            **نصائح للحل:**
+            • للعملات الرقمية: جرب BTC-USD, ETH-USD, SOL-USD...
+            • للأسهم: جرب AAPL, TSLA, NVDA... (يتطلب مفتاح Polygon صحيح)
+            • تأكد من كتابة الرمز بدون مسافات زائدة
+            """)
             st.stop()
 
-        # ─── التحليل ─────────────────────────────────────────────────────
-        alerts = detect_pump_dump_signals(df)
+        # ─── التحليل والعرض ─────────────────────────────────────────────
 
-        st.success(f"تم جلب {len(df)} يوم من {used_source}")
+        st.success(f"تم جلب {len(df)} يوم من **{used}**")
+
+        alerts = find_pump_dump_signals(df)
 
         if alerts:
-            st.subheader("⚠️ إشارات مشبوهة محتملة")
-            for al in alerts:
+            st.subheader("⚠️ إشارات مشبوهة")
+            for a in alerts:
                 st.warning(
-                    f"**{al['date']}**  \n"
-                    f"تغيّر السعر: **+{al['price_chg']}%**    \n"
-                    f"تغيّر الحجم: **+{al['vol_chg']}%**    \n"
-                    f"تقدير مخاطر الانهيار: **{al['risk_pct']}%**"
+                    f"**{a['date']}**  \n"
+                    f"تغيّر السعر: **+{a['price_change']}%**  \n"
+                    f"تغيّر الحجم: **+{a['vol_change']}%**  \n"
+                    f"تقدير مخاطر انهيار: **{a['risk']}%**"
                 )
         else:
-            st.success("لا توجد إشارات Pump & Dump واضحة في الفترة المختارة.")
+            st.success("لا توجد إشارات Pump & Dump واضحة في الفترة الحالية.")
 
-        # ─── عرض الرسم البياني والجدول ──────────────────────────────────
         st.subheader("سعر الإغلاق")
         st.line_chart(df["close"])
 
-        with st.expander("بيانات مفصلة"):
-            st.dataframe(df.round(2))
+        col1, col2 = st.columns(2)
 
-        with st.expander("إحصائيات"):
-            st.dataframe(df.describe().round(2))
+        with col1:
+            with st.expander("بيانات يومية"):
+                st.dataframe(df.round(2))
+
+        with col2:
+            with st.expander("إحصائيات"):
+                st.dataframe(df.describe().round(2))
 
 st.markdown("---")
-st.caption("للأغراض التعليمية والبحثية فقط • لا يُعتبر نصيحة استثمارية")
+st.caption("للأغراض التعليمية والبحثية فقط • غير نصيحة استثمارية")
