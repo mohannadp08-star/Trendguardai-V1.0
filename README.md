@@ -1,7 +1,8 @@
 # TrendGuardAI 🛡️📈  
 **حارس الترندات المالية – كشف Pump & Dump و FOMO قبل حدوثه*
 
-![TrendGuardAI Demo](https://drive.google.com/file/d/11nX-zY7PAapM5bjHNcQhJ3tbtq7bLa5B/view)
+![TrendGuardAI Demo]
+(https://drive.google.com/file/d/11nX-zY7PAapM5bjHNcQhJ3tbtq7bLa5B/view)
 
 TrendGuardAI هو أداة ذكية مبنية على Python + Streamlit تساعد المتداو لين والمستثمرين على مراقبة **ترندات الأسواق** (أسهم، كريبتو، سلع) واكتشاف الإشارات المشبوهة مبكرًا مثل:
 
