@@ -1,6 +1,6 @@
-pipx install streamlit
-pipx install polygon-api-client
-pipx install pycoingecko
-pipx install pandas
-pipx install numpy
-pipx install matplotlib
+streamlit
+polygon-api-client
+pycoingecko
+pandas
+numpy
+matplotlib
