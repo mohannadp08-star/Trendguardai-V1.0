@@ -1,5 +1,6 @@
 # TrendGuardAI 🛡️📈  
-**حارس الترندات المالية – كشف Pump & Dump و FOMO قبل حدوثه**
+**حارس الترندات المالية – كشف Pump & Dump و FOMO قبل حدوثه*
+
 ![TrendGuardAI Demo](https://via.placeholder.com/800x400?text=TrendGuardAI+Dashboard+Screenshot)  
 *(https://drive.google.com/file/d/11nX-zY7PAapM5bjHNcQhJ3tbtq7bLa5B/view)*
 
