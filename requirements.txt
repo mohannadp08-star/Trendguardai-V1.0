@@ -3,4 +3,3 @@ polygon-api-client
 pycoingecko
 pandas
 numpy
-matplotlib
